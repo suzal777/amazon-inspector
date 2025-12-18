@@ -92,9 +92,11 @@ jobs:
         run: |
           inspector-sbomgen container \
             --image ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
-            --scan-bom \
+            --scan-sbom \
             --aws-region ${{ env.AWS_REGION }} \
-            -o scan_results.json
+            --scan-sbom-output-format inspector \
+            --scan-sbom-service inspector \
+            --outfile scan_results.json
 
       # 9. Display scan results
       - name: Display scan results
