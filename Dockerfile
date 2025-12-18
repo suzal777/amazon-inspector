@@ -15,9 +15,6 @@ RUN apt-get update && \
         libssl1.1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-secure runtime pattern
-RUN useradd -u 0 insecureuser
-
 # Run as root (intentional bad practice)
 USER root
 
