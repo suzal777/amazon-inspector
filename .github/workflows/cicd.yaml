@@ -83,8 +83,8 @@ jobs:
         run: |
           curl -LO https://amazon-inspector-sbomgen.s3.amazonaws.com/latest/linux/amd64/inspector-sbomgen.zip
           unzip inspector-sbomgen.zip
-          chmod +x inspector-sbomgen
-          sudo mv inspector-sbomgen /usr/local/bin/inspector-sbomgen
+          chmod +x inspector-sbomgen-1.10.0/linux/amd64/inspector-sbomgen
+          sudo mv inspector-sbomgen-1.10.0/linux/amd64/inspector-sbomgen /usr/local/bin/inspector-sbomgen
           inspector-sbomgen --version
 
       # 8. Generate SBOM and scan using Inspector Scan API
