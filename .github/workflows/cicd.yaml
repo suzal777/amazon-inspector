@@ -105,11 +105,11 @@ jobs:
       # 10. Custom threshold enforcement
       - name: Enforce vulnerability thresholds
         run: |
-          CRITICAL=$(jq '.vulnerabilities // [] | map(select(.severity=="CRITICAL")) | length' scan_results.json)
-          HIGH=$(jq '.vulnerabilities // [] | map(select(.severity=="HIGH")) | length' scan_results.json)
-          MEDIUM=$(jq '.vulnerabilities // [] | map(select(.severity=="MEDIUM")) | length' scan_results.json)
-          LOW=$(jq '.vulnerabilities // [] | map(select(.severity=="LOW")) | length' scan_results.json)
-          OTHER=$(jq '.vulnerabilities // [] | map(select(.severity=="UNTRIAGED" or .severity=="unknown")) | length' scan_results.json)
+          CRITICAL=$(jq '.vulnerabilities // [] | map(select(.severity=="critical")) | length' scan_results.json)
+          HIGH=$(jq '.vulnerabilities // [] | map(select(.severity=="high")) | length' scan_results.json)
+          MEDIUM=$(jq '.vulnerabilities // [] | map(select(.severity=="medium")) | length' scan_results.json)
+          LOW=$(jq '.vulnerabilities // [] | map(select(.severity=="=low")) | length' scan_results.json)
+          OTHER=$(jq '.vulnerabilities // [] | map(select(.severity=="untriaged" or .severity=="unknown")) | length' scan_results.json)
 
           echo "Critical=$CRITICAL High=$HIGH Medium=$MEDIUM Low=$LOW Other=$OTHER"
 
