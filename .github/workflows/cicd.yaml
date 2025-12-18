@@ -1,38 +1,40 @@
-name: Build, Push to ECR
+name: Build, Scan (Inspector Custom), Push to ECR
 
 on:
   workflow_dispatch:
+
 permissions:
-      id-token: write   # This is required for requesting the JWT
-      contents: read    # This is required for actions/checkout
+  id-token: write
+  contents: read
+
 env:
-  AWS_REGION: us-east-1  
-  ECR_REPOSITORY: sujal-inspector-repo 
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: sujal-inspector-repo
+  IMAGE_TAG: ${{ github.sha }}
+
   CRITICAL_THRESHOLD: 0
   HIGH_THRESHOLD: 0
   MEDIUM_THRESHOLD: 5
   LOW_THRESHOLD: 5
   OTHER_THRESHOLD: 5
 
-
 jobs:
   build-container:
     runs-on: ubuntu-latest
-    outputs:
-      docker-image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
     timeout-minutes: 60
+
     steps:
-      # checkout the repository containing our Dockerfile
-      - name: Checkout this repository
+      # 1. Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Setup prerequisites for docker/build-push-action
-      - name: Set up docker build prereqs (QEMU)
+      # 2. Docker prerequisites
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: Set up docker build prereqs (Buildx)
+      - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Cache Docker layers
         uses: actions/cache@v4
         with:
@@ -41,79 +43,96 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx
 
+      # 3. Configure AWS credentials (OIDC)
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.OICD_ROLE }}
-          role-session-name: gh-${{ github.repository_id}}-${{ github.sha }}
+          role-session-name: gh-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Rolechain into deployment role
+      # 4. Role chaining 
+      - name: Assume deployment role
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE }}
-          role-session-name: gh-d-${{ github.repository_id}}-${{ github.sha }}
-          aws-region: ${{ env.AWS_REGION }}  
-          role-chaining: true      
+          role-session-name: gh-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-chaining: true
 
+      # 5. Login to ECR (needed later)
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      # build the image you wish to scan
+      # 6. Build Docker image locally (NO PUSH)
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: false
-          build-args: |
-            GIT_SHA=${{ github.sha }}
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
           load: true
+          tags: |
+            ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
 
-      - name: Scan built image with Inspector
-        uses: aws-actions/vulnerability-scan-github-action-for-amazon-inspector@v1
-        id: inspector
-        with:
-          artifact_type: 'container'
-          artifact_path: '${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}'
-          critical_threshold: ${{ env.CRITICAL_THRESHOLD }}
-          high_threshold: ${{ env.HIGH_THRESHOLD }}
-          medium_threshold: ${{ env.MEDIUM_THRESHOLD }}
-          low_threshold: ${{ env.LOW_THRESHOLD }}
-          other_threshold: ${{ env.OTHER_THRESHOLD }}
-        
-      - name: Display Inspector vulnerability scan results (markdown)
-        run: cat ${{ steps.inspector.outputs.inspector_scan_results_markdown }}
+      # 7. Install Amazon Inspector SBOM Generator
+      - name: Install Inspector SBOM Generator
+        run: |
+          curl -LO https://inspector-sbomgen.s3.${{ env.AWS_REGION }}.amazonaws.com/latest/inspector-sbomgen-linux-amd64
+          chmod +x inspector-sbomgen-linux-amd64
+          sudo mv inspector-sbomgen-linux-amd64 /usr/local/bin/inspector-sbomgen
+          inspector-sbomgen --version
 
-      - name: Upload Scan Results
+      # 8. Generate SBOM and scan using Inspector Scan API
+      - name: Generate SBOM and scan image
+        run: |
+          inspector-sbomgen container \
+            --image ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+            --scan-bom \
+            --aws-region ${{ env.AWS_REGION }} \
+            -o scan_results.json
+
+      # 9. Display scan results
+      - name: Display scan results
+        run: jq '.' scan_results.json
+
+      # 10. Custom threshold enforcement
+      - name: Enforce vulnerability thresholds
+        run: |
+          CRITICAL=$(jq '.findings | map(select(.severity=="CRITICAL")) | length' scan_results.json)
+          HIGH=$(jq '.findings | map(select(.severity=="HIGH")) | length' scan_results.json)
+          MEDIUM=$(jq '.findings | map(select(.severity=="MEDIUM")) | length' scan_results.json)
+          LOW=$(jq '.findings | map(select(.severity=="LOW")) | length' scan_results.json)
+          OTHER=$(jq '.findings | map(select(.severity=="UNTRIAGED")) | length' scan_results.json)
+
+          echo "Critical=$CRITICAL High=$HIGH Medium=$MEDIUM Low=$LOW Other=$OTHER"
+
+          [ "$CRITICAL" -gt "${{ env.CRITICAL_THRESHOLD }}" ] && exit 1
+          [ "$HIGH" -gt "${{ env.HIGH_THRESHOLD }}" ] && exit 1
+          [ "$MEDIUM" -gt "${{ env.MEDIUM_THRESHOLD }}" ] && exit 1
+          [ "$LOW" -gt "${{ env.LOW_THRESHOLD }}" ] && exit 1
+          [ "$OTHER" -gt "${{ env.OTHER_THRESHOLD }}" ] && exit 1
+
+          echo "✅Vulnerability thresholds satisfied"
+
+      # 11. Upload SBOM & scan results
+      - name: Upload scan artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Uploading scan SBOM results
+          name: inspector-scan-results
           path: |
-            ${{ steps.inspector.outputs.inspector_scan_results }}
-            ${{ steps.inspector.outputs.inspector_scan_results_csv }}
-            ${{ steps.inspector.outputs.artifact_sbom }}
+            scan_results.json
 
-      - name: Fail job if vulnerability threshold is exceeded
-        run: exit ${{ steps.inspector.outputs.vulnerability_threshold_exceeded }}
+      # 12. Tag & push image to ECR (only if scan passed)
+      - name: Push image to ECR
+        run: |
+          ECR_URI=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
 
-      - name: Build Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          build-args: |
-            GIT_SHA=${{ github.sha }}
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          load: true
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache    
+          docker tag \
+            ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+            $ECR_URI:${{ env.IMAGE_TAG }}
+
+          docker push $ECR_URI:${{ env.IMAGE_TAG }}
