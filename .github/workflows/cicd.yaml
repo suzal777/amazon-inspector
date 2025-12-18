@@ -102,7 +102,15 @@ jobs:
       - name: Display scan results
         run: jq '.' scan_results.json
 
-      # 10. Custom threshold enforcement
+      # 10. Upload SBOM & scan results
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: inspector-scan-results
+          path: |
+            scan_results.json
+
+      # 11. Custom threshold enforcement
       - name: Enforce vulnerability thresholds
         run: |
           CRITICAL=$(jq '.vulnerabilities // [] | map(select(.severity=="critical")) | length' scan_results.json)
@@ -120,14 +128,6 @@ jobs:
           [ "$OTHER" -gt "${{ env.OTHER_THRESHOLD }}" ] && { echo "Other threshold exceeded"; exit 1; }
 
           echo "Vulnerability thresholds satisfied"
-
-      # 11. Upload SBOM & scan results
-      - name: Upload scan artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: inspector-scan-results
-          path: |
-            scan_results.json
 
       # 12. Tag & push image to ECR (only if scan passed)
       - name: Push image to ECR

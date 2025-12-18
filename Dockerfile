@@ -1,24 +1,21 @@
-# Use supported LTS image
-FROM ubuntu:22.04
+# OLD base image with known CVEs
+FROM ubuntu:18.04
 
-# Avoid interactive installs
-ENV DEBIAN_FRONTEND=noninteractive
+# Disable security updates (makes it worse on purpose)
+RUN sed -i 's/security.ubuntu.com/archive.ubuntu.com/g' /etc/apt/sources.list
 
-# Update & install only required packages with security patches
+# Install vulnerable packages
 RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
+    apt-get install -y \
         curl \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+        wget \
+        openssl \
+        bash \
+        libc6 \
+        libssl1.1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -m -u 10001 appuser
-
-# Switch to non-root user
-USER appuser
-
-WORKDIR /app
+# Run as root (intentional bad practice)
+USER root
 
 CMD ["bash"]
