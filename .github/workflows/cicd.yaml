@@ -105,21 +105,21 @@ jobs:
       # 10. Custom threshold enforcement
       - name: Enforce vulnerability thresholds
         run: |
-          CRITICAL=$(jq '.findings | map(select(.severity=="CRITICAL")) | length' scan_results.json)
-          HIGH=$(jq '.findings | map(select(.severity=="HIGH")) | length' scan_results.json)
-          MEDIUM=$(jq '.findings | map(select(.severity=="MEDIUM")) | length' scan_results.json)
-          LOW=$(jq '.findings | map(select(.severity=="LOW")) | length' scan_results.json)
-          OTHER=$(jq '.findings | map(select(.severity=="UNTRIAGED")) | length' scan_results.json)
+          CRITICAL=$(jq '.vulnerabilities // [] | map(select(.severity=="CRITICAL")) | length' scan_results.json)
+          HIGH=$(jq '.vulnerabilities // [] | map(select(.severity=="HIGH")) | length' scan_results.json)
+          MEDIUM=$(jq '.vulnerabilities // [] | map(select(.severity=="MEDIUM")) | length' scan_results.json)
+          LOW=$(jq '.vulnerabilities // [] | map(select(.severity=="LOW")) | length' scan_results.json)
+          OTHER=$(jq '.vulnerabilities // [] | map(select(.severity=="UNTRIAGED" or .severity=="unknown")) | length' scan_results.json)
 
           echo "Critical=$CRITICAL High=$HIGH Medium=$MEDIUM Low=$LOW Other=$OTHER"
 
-          [ "$CRITICAL" -gt "${{ env.CRITICAL_THRESHOLD }}" ] && exit 1
-          [ "$HIGH" -gt "${{ env.HIGH_THRESHOLD }}" ] && exit 1
-          [ "$MEDIUM" -gt "${{ env.MEDIUM_THRESHOLD }}" ] && exit 1
-          [ "$LOW" -gt "${{ env.LOW_THRESHOLD }}" ] && exit 1
-          [ "$OTHER" -gt "${{ env.OTHER_THRESHOLD }}" ] && exit 1
+          [ "$CRITICAL" -gt "${{ env.CRITICAL_THRESHOLD }}" ] && { echo "Critical threshold exceeded"; exit 1; }
+          [ "$HIGH" -gt "${{ env.HIGH_THRESHOLD }}" ] && { echo "High threshold exceeded"; exit 1; }
+          [ "$MEDIUM" -gt "${{ env.MEDIUM_THRESHOLD }}" ] && { echo "Medium threshold exceeded"; exit 1; }
+          [ "$LOW" -gt "${{ env.LOW_THRESHOLD }}" ] && { echo "Low threshold exceeded"; exit 1; }
+          [ "$OTHER" -gt "${{ env.OTHER_THRESHOLD }}" ] && { echo "Other threshold exceeded"; exit 1; }
 
-          echo "✅Vulnerability thresholds satisfied"
+          echo "Vulnerability thresholds satisfied"
 
       # 11. Upload SBOM & scan results
       - name: Upload scan artifacts
